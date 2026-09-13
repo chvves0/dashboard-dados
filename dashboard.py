@@ -80,7 +80,6 @@ SITUACOES = {
     "ate75":     {"rotulo": "51% a 75% da meta",           "cor": OURO,        "ordem": 3},
     "ate99":     {"rotulo": "76% a 99% da meta",           "cor": VERDE_CLARO, "ordem": 4},
     "batida":    {"rotulo": "Meta batida · 100% ou mais",  "cor": VERDE,       "ordem": 5},
-    "sem_dados": {"rotulo": "Sem base para calcular",      "cor": CINZA,       "ordem": 6},
 }
 ORDEM_SIT = sorted(SITUACOES, key=lambda k: SITUACOES[k]["ordem"])
 
@@ -90,9 +89,12 @@ def faixa_alcance(alcance, membros) -> str:
 
     Os cortes são fechados à direita (25% cai em '0,1% a 25%', 25,4% já cai na
     faixa seguinte), então não sobra buraco entre as faixas.
+
+    EJ sem membros na base — em que o alcance seria uma divisão por zero — entra
+    como zerada. O bloco da meta da FEJERS mostra quantas são.
     """
     if pd.isna(alcance) or pd.isna(membros) or (membros or 0) <= 0:
-        return "sem_dados"
+        return "zerada"
     if alcance <= 0:
         return "zerada"
     if alcance <= 25:
@@ -476,7 +478,7 @@ def carregar(
         "participacoes":   len(participacoes),
         "ejs_rede":        len(empresas),
         "ejs_sem_produto": int((empresas["produtos"] == 0).sum()),
-        "ejs_sem_membros": int((empresas["situacao"] == "sem_dados").sum()),
+        "ejs_sem_membros": int((empresas["membros"].fillna(0) <= 0).sum()),
     }
 
     return (
@@ -774,7 +776,7 @@ with st.container(border=True):
         "Meta da FEJERS no Engajamento com o MEJ",
         f"A federação bate a meta quando {pct(META_FED_SHARE * 100, 0)} da rede "
         f"alcança, cada EJ por si, pelo menos {pct(META_FED_PISO * 100, 0)} de ECM. "
-        "Este bloco olha sempre a rede inteira, os filtros da barra lateral não o "
+        "Este bloco olha sempre a rede inteira — os filtros da barra lateral não o "
         "alteram.",
     )
 
@@ -961,16 +963,31 @@ with col_esq:
         )
         st.plotly_chart(barra_situacao(selecao), width="stretch", key="situacao")
 
-        zeradas     = selecao[selecao["situacao"] == "zerada"]
-        zeradas_sem = int((zeradas["produtos"] == 0).sum())
+        zeradas = selecao[selecao["situacao"] == "zerada"]
         if len(zeradas):
-            com_registro = len(zeradas) - zeradas_sem
+            sem_membros_z = int((zeradas["membros"].fillna(0) <= 0).sum())
+            sem_produto_z = int(((zeradas["membros"].fillna(0) > 0)
+                                 & (zeradas["produtos"] == 0)).sum())
+            com_produto_z = len(zeradas) - sem_membros_z - sem_produto_z
+            partes = []
+            if sem_membros_z:
+                partes.append(f"{sem_membros_z} estão com zero membros na base")
+            if sem_produto_z:
+                partes.append(
+                    f"{sem_produto_z} têm membros mas não aparecem em nenhum produto"
+                )
+            if com_produto_z:
+                partes.append(
+                    f"{com_produto_z} "
+                    + ("aparece" if com_produto_z == 1 else "aparecem")
+                    + " em produto mas sem ninguém contabilizado no ECM"
+                )
             st.caption(
-                f"Das {len(zeradas)} EJs zeradas, {zeradas_sem} não aparecem em nenhum "
-                f"produto de conexão e {com_registro} "
-                + ("aparece" if com_registro == 1 else "aparecem")
-                + ", mas sem nenhum membro contabilizado no ECM — nesse segundo caso "
-                "vale checar se a presença foi lançada no Portal BJ."
+                f"Das {len(zeradas)} EJs zeradas, "
+                + "; ".join(partes)
+                + ". Zero membros e zero lançamento no Portal BJ costumam ser problema "
+                "de cadastro, não de engajamento — vale separar um do outro antes de "
+                "cobrar a EJ."
             )
 
         painel(
