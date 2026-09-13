@@ -29,6 +29,8 @@ st.set_page_config(
 NAVY    = "#02195B"
 AMARELO = "#FFC831"
 VERDE   = "#2D783A"
+VERDE_CLARO = "#6FA043"
+LARANJA = "#E08A2E"
 VERMELHO= "#C8442E"
 VINHO   = "#8C2D1B"
 OURO    = "#E0A800"
@@ -72,13 +74,36 @@ NOMES_GERAIS = [
 ]
 
 SITUACOES = {
-    "sem_registro": {"rotulo": "Não aparece em nenhum produto", "cor": VINHO,    "ordem": 0},
-    "abaixo":       {"rotulo": "Abaixo de 50% da meta",        "cor": VERMELHO, "ordem": 1},
-    "parcial":      {"rotulo": "Entre 50% e 99% da meta",      "cor": OURO,     "ordem": 2},
-    "meta":         {"rotulo": "Meta de ECM batida",           "cor": VERDE,    "ordem": 3},
-    "sem_dados":    {"rotulo": "Sem base de membros",          "cor": CINZA,    "ordem": 4},
+    "zerada":    {"rotulo": "Zeradas · 0% de alcance",     "cor": VINHO,       "ordem": 0},
+    "ate25":     {"rotulo": "0,1% a 25% da meta",          "cor": VERMELHO,    "ordem": 1},
+    "ate50":     {"rotulo": "26% a 50% da meta",           "cor": LARANJA,     "ordem": 2},
+    "ate75":     {"rotulo": "51% a 75% da meta",           "cor": OURO,        "ordem": 3},
+    "ate99":     {"rotulo": "76% a 99% da meta",           "cor": VERDE_CLARO, "ordem": 4},
+    "batida":    {"rotulo": "Meta batida · 100% ou mais",  "cor": VERDE,       "ordem": 5},
+    "sem_dados": {"rotulo": "Sem base para calcular",      "cor": CINZA,       "ordem": 6},
 }
 ORDEM_SIT = sorted(SITUACOES, key=lambda k: SITUACOES[k]["ordem"])
+
+
+def faixa_alcance(alcance, membros) -> str:
+    """Classifica a EJ pela fatia da própria meta que já alcançou.
+
+    Os cortes são fechados à direita (25% cai em '0,1% a 25%', 25,4% já cai na
+    faixa seguinte), então não sobra buraco entre as faixas.
+    """
+    if pd.isna(alcance) or pd.isna(membros) or (membros or 0) <= 0:
+        return "sem_dados"
+    if alcance <= 0:
+        return "zerada"
+    if alcance <= 25:
+        return "ate25"
+    if alcance <= 50:
+        return "ate50"
+    if alcance <= 75:
+        return "ate75"
+    if alcance < 100:
+        return "ate99"
+    return "batida"
 
 # --------------------------------------------------------------------------
 # Meta da FEJERS no indicador de rede
@@ -442,19 +467,9 @@ def carregar(
     empresas = empresas.drop(columns=["gap_calc"], errors="ignore")
 
     # ---- Classificar situação de cada EJ ---------------------------------
-    def situacao(linha):
-        if linha["produtos"] == 0:
-            return "sem_registro"
-        if (pd.isna(linha["membros"]) or (linha["membros"] or 0) <= 0
-                or pd.isna(linha["alcance"])):
-            return "sem_dados"
-        if linha["alcance"] >= 100:
-            return "meta"
-        if linha["alcance"] >= 50:
-            return "parcial"
-        return "abaixo"
-
-    empresas["situacao"] = empresas.apply(situacao, axis=1)
+    empresas["situacao"] = empresas.apply(
+        lambda l: faixa_alcance(l["alcance"], l["membros"]), axis=1
+    )
     empresas["cluster"]  = empresas["cluster"].fillna(0)
 
     avisos = {
@@ -651,7 +666,7 @@ with st.sidebar:
 
     situacoes_na_base = [s for s in ORDEM_SIT if (empresas["situacao"] == s).any()]
     escolha_situacao = st.multiselect(
-        "Situação da meta",
+        "Alcance da meta",
         situacoes_na_base,
         format_func=lambda s: SITUACOES[s]["rotulo"],
     )
@@ -699,7 +714,7 @@ if selecao.empty:
 # KPIs principais
 # --------------------------------------------------------------------------
 
-bateram      = int(((selecao["gap"] == 0) & (selecao["situacao"] != "sem_registro")).sum())
+bateram      = int((selecao["situacao"] == "batida").sum())
 membros_rede = selecao["membros"].sum(skipna=True)
 engajados_rede= selecao["engajados"].sum(skipna=True)
 ecm_rede     = (engajados_rede / membros_rede * 100) if membros_rede else float("nan")
@@ -941,9 +956,22 @@ with col_esq:
     with st.container(border=True):
         painel(
             "Onde a rede está em relação à meta",
-            "Cada EJ classificada pelo quanto já alcançou da própria meta de ECM.",
+            "Cada EJ na faixa do quanto já alcançou da própria meta de ECM. "
+            "As mesmas faixas estão no filtro da barra lateral.",
         )
         st.plotly_chart(barra_situacao(selecao), width="stretch", key="situacao")
+
+        zeradas     = selecao[selecao["situacao"] == "zerada"]
+        zeradas_sem = int((zeradas["produtos"] == 0).sum())
+        if len(zeradas):
+            com_registro = len(zeradas) - zeradas_sem
+            st.caption(
+                f"Das {len(zeradas)} EJs zeradas, {zeradas_sem} não aparecem em nenhum "
+                f"produto de conexão e {com_registro} "
+                + ("aparece" if com_registro == 1 else "aparecem")
+                + ", mas sem nenhum membro contabilizado no ECM — nesse segundo caso "
+                "vale checar se a presença foi lançada no Portal BJ."
+            )
 
         painel(
             "Quantas pessoas faltam para bater a meta",
@@ -989,7 +1017,7 @@ with col_dir:
         )
         por_cluster = (
             selecao.assign(
-                bateu=(selecao["gap"] == 0) & (selecao["situacao"] != "sem_registro")
+                bateu=(selecao["situacao"] == "batida")
             )
             .groupby("cluster")
             .agg(ejs=("ej", "count"), bateram=("bateu", "sum"), gap=("gap", "sum"))
