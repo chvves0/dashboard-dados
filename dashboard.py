@@ -774,7 +774,7 @@ with st.container(border=True):
         "Meta da FEJERS no Engajamento com o MEJ",
         f"A federação bate a meta quando {pct(META_FED_SHARE * 100, 0)} da rede "
         f"alcança, cada EJ por si, pelo menos {pct(META_FED_PISO * 100, 0)} de ECM. "
-        "Este bloco olha sempre a rede inteira — os filtros da barra lateral não o "
+        "Este bloco olha sempre a rede inteira, os filtros da barra lateral não o "
         "alteram.",
     )
 
