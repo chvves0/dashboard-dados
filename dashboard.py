@@ -80,6 +80,16 @@ SITUACOES = {
 }
 ORDEM_SIT = sorted(SITUACOES, key=lambda k: SITUACOES[k]["ordem"])
 
+# --------------------------------------------------------------------------
+# Meta da FEJERS no indicador de rede
+# --------------------------------------------------------------------------
+# A federação bate a meta quando META_FED_SHARE das EJs da rede alcança,
+# individualmente, pelo menos META_FED_PISO de Engajamento com o MEJ.
+# Hoje: 51% da rede em 50% de ECM — com 61 EJs, 32 precisam chegar lá.
+
+META_FED_SHARE = 0.51   # fatia da rede que precisa alcançar o piso
+META_FED_PISO  = 0.50   # ECM mínimo de cada EJ para entrar na conta
+
 TRILHOS_CSS = "\n".join(
     f'    div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]'
     f':nth-child({pos}) div[data-testid="stMetric"] '
@@ -741,6 +751,187 @@ linha2[2].metric(
 st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
 # --------------------------------------------------------------------------
+# Meta da FEJERS
+# --------------------------------------------------------------------------
+
+with st.container(border=True):
+    painel(
+        "Meta da FEJERS no Engajamento com o MEJ",
+        f"A federação bate a meta quando {pct(META_FED_SHARE * 100, 0)} da rede "
+        f"alcança, cada EJ por si, pelo menos {pct(META_FED_PISO * 100, 0)} de ECM. "
+        "Este bloco olha sempre a rede inteira — os filtros da barra lateral não o "
+        "alteram.",
+    )
+
+    rede_total  = len(empresas)
+    alvo_ejs    = math.ceil(META_FED_SHARE * rede_total - 1e-9)
+    qualificada = empresas["atual"].fillna(-1) >= META_FED_PISO
+    qtd_qualif  = int(qualificada.sum())
+    share_atual = qtd_qualif / rede_total * 100 if rede_total else float("nan")
+    faltam_ejs  = max(0, alvo_ejs - qtd_qualif)
+
+    def falta_para_piso(linha):
+        """Pessoas que faltam para a EJ cruzar o piso de ECM da meta da federação."""
+        membros = linha["membros"]
+        if pd.isna(membros) or (membros or 0) <= 0:
+            return pd.NA
+        alvo = math.ceil(META_FED_PISO * membros - 1e-9)
+        return max(0, int(alvo - (linha["engajados"] or 0)))
+
+    rede_meta = empresas.copy()
+    rede_meta["qualificada"] = qualificada
+    rede_meta["falta_piso"]  = rede_meta.apply(falta_para_piso, axis=1)
+
+    candidatas = (
+        rede_meta[(~rede_meta["qualificada"]) & rede_meta["falta_piso"].notna()]
+        .sort_values(["falta_piso", "membros"])
+        .copy()
+    )
+    candidatas["acumulado"] = candidatas["falta_piso"].cumsum()
+
+    rota         = candidatas.head(faltam_ejs)
+    pessoas_rota = int(rota["falta_piso"].sum()) if len(rota) else 0
+    sem_membros  = int((rede_meta["membros"].fillna(0) <= 0).sum())
+    bateram_meta_propria = int(
+        (empresas["atual"].fillna(-1) >= empresas["meta"].fillna(9)).sum()
+    )
+
+    kpi_fed = st.columns(3)
+    kpi_fed[0].metric(
+        f"EJs com {pct(META_FED_PISO * 100, 0)} ou mais de ECM",
+        f"{qtd_qualif} de {rede_total}",
+        delta=f"{pct(share_atual)} da rede · a meta é {pct(META_FED_SHARE * 100, 0)}",
+        delta_color="off",
+    )
+    kpi_fed[1].metric(
+        "EJs que ainda faltam",
+        f"{faltam_ejs}",
+        delta=f"o alvo são {alvo_ejs} EJs acima do piso",
+        delta_color="off",
+    )
+    kpi_fed[2].metric(
+        "Pessoas no caminho mais curto",
+        num(pessoas_rota) if faltam_ejs else "0",
+        delta=(
+            f"somadas as {len(rota)} EJs mais próximas do piso"
+            if faltam_ejs else "meta já fechada"
+        ),
+        delta_color="off",
+    )
+
+    restante = max(0, rede_total - qtd_qualif - len(rota))
+
+    figura_meta = go.Figure()
+    for quantidade, rotulo, cor, cor_texto in [
+        (qtd_qualif, f"Já em {pct(META_FED_PISO * 100, 0)} ou mais", VERDE, "#FFFFFF"),
+        (len(rota),  "Caminho mais curto até a meta",               AMARELO, TEXTO),
+        (restante,   "Demais EJs da rede",                          "#EDEFF4", MUDO),
+    ]:
+        if quantidade <= 0:
+            continue
+        figura_meta.add_bar(
+            x=[quantidade], y=["rede"], orientation="h",
+            name=rotulo, marker_color=cor,
+            text=[str(quantidade)],
+            textposition="inside", insidetextanchor="middle",
+            textfont=dict(color=cor_texto, size=13, family="Poppins"),
+            hovertemplate=(
+                f"<b>{rotulo}</b><br>{quantidade} EJs "
+                f"({quantidade / rede_total * 100:.1f}% da rede)<extra></extra>"
+            ),
+        )
+    figura_meta.add_vline(
+        x=alvo_ejs, line_width=3, line_dash="dash", line_color=VERMELHO,
+        annotation_text=f"meta: {alvo_ejs} EJs",
+        annotation_position="top",
+        annotation_font=dict(family="Poppins", size=12, color=VERMELHO),
+    )
+    figura_meta.update_layout(
+        barmode="stack", height=150,
+        margin=dict(l=0, r=10, t=28, b=0),
+        legend=dict(orientation="h", y=-0.35, x=0, font=dict(size=11)),
+        xaxis=dict(visible=False, range=[0, rede_total * 1.02]),
+        yaxis=dict(visible=False),
+        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+    )
+    st.plotly_chart(figura_meta, width="stretch", key="meta_fejers")
+
+    if faltam_ejs == 0:
+        st.success(
+            f"A meta está fechada: {qtd_qualif} EJs já estão em "
+            f"{pct(META_FED_PISO * 100, 0)} ou mais de ECM, {qtd_qualif - alvo_ejs} "
+            "acima do alvo. Vale acompanhar as que passaram raspando, porque uma "
+            "entrada de trainees derruba o percentual sem ninguém desengajar."
+        )
+    else:
+        painel(
+            "Caminho mais curto até a meta",
+            f"As {faltam_ejs} EJs abaixo do piso que precisam de menos gente para "
+            "cruzá-lo. O acumulado mostra quantas pessoas a federação precisa engajar "
+            "se resolver ir por aqui.",
+        )
+
+        rota_exibir = rota.assign(
+            cluster_txt=rota["cluster"].map(lambda c: f"C{int(c)}" if c > 0 else "—"),
+            atual_pct=rota["atual"] * 100,
+            piso_pessoas=rota.apply(
+                lambda l: math.ceil(META_FED_PISO * l["membros"] - 1e-9), axis=1
+            ),
+        )[[
+            "ej", "guardiao", "cluster_txt", "membros", "engajados",
+            "atual_pct", "piso_pessoas", "falta_piso", "acumulado",
+        ]]
+
+        st.dataframe(
+            rota_exibir,
+            hide_index=True,
+            width="stretch",
+            column_config={
+                "ej":           st.column_config.TextColumn("Empresa Júnior", width="large"),
+                "guardiao":     st.column_config.TextColumn("Guardião", width="small"),
+                "cluster_txt":  st.column_config.TextColumn("Cluster", width="small"),
+                "membros":      st.column_config.NumberColumn("Membros", format="%d", width="small"),
+                "engajados":    st.column_config.NumberColumn("Engajados", format="%d", width="small"),
+                "atual_pct":    st.column_config.NumberColumn("% ECM atual", format="%.1f%%"),
+                "piso_pessoas": st.column_config.NumberColumn(
+                    f"Pessoas para {pct(META_FED_PISO * 100, 0)}", format="%d"
+                ),
+                "falta_piso":   st.column_config.NumberColumn("Faltam", format="%d", width="small"),
+                "acumulado":    st.column_config.NumberColumn("Acumulado", format="%d", width="small"),
+            },
+        )
+
+        proximas = candidatas.iloc[len(rota):len(rota) + 5]
+        if not proximas.empty:
+            st.caption(
+                "Logo atrás vêm "
+                + ", ".join(
+                    f"**{l['ej']}** ({int(l['falta_piso'])})"
+                    for _, l in proximas.iterrows()
+                )
+                + " — as próximas da fila caso alguma das de cima não avance."
+            )
+
+    avisos_meta = []
+    if sem_membros:
+        avisos_meta.append(
+            f"**{sem_membros} EJs estão com zero membros na base** e, do jeito que a "
+            f"conta está montada, nunca entram nas {alvo_ejs} — mas continuam no "
+            f"denominador das {rede_total}. Se alguma delas estiver com o Portal "
+            "desatualizado, corrigir o cadastro muda a meta sem engajar ninguém."
+        )
+    avisos_meta.append(
+        f"Pelo critério do PE — em que a EJ só é contabilizada quando bate a **própria** "
+        f"meta de ECM, e não um piso fixo de {pct(META_FED_PISO * 100, 0)} — seriam "
+        f"**{bateram_meta_propria} EJs** ({pct(bateram_meta_propria / rede_total * 100)} "
+        "da rede). Vale conferir qual das duas leituras a Brasil Júnior audita antes de "
+        "cravar o número."
+    )
+    st.caption("  \n".join(avisos_meta))
+
+st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+
+# --------------------------------------------------------------------------
 # Distribuição e faixas de gap
 # --------------------------------------------------------------------------
 
@@ -1049,8 +1240,12 @@ st.markdown(
     Por isso as presenças somadas superam o número de engajados.<br>
     <b>Cobertura da rede</b> usa como denominador as {avisos['ejs_rede']} EJs da base,
     incluindo as {avisos['ejs_sem_produto']} que não aparecem em nenhum produto de conexão.
-    Para o indicador da federação, só conta a EJ que bate a própria meta de Engajamento
-    com o MEJ — presença sem atingir a meta não entra.<br>
+    <b>Meta da FEJERS.</b> O bloco da federação conta as EJs com ECM individual de
+    {pct(META_FED_PISO * 100, 0)} ou mais e compara com o alvo de
+    {math.ceil(META_FED_SHARE * avisos['ejs_rede'] - 1e-9)} EJs
+    ({pct(META_FED_SHARE * 100, 0)} das {avisos['ejs_rede']}). Presença sem chegar ao
+    piso não entra. O critério alternativo — EJ que bate a própria meta — aparece como
+    contraponto no mesmo bloco.<br>
     <b>Registro é gargalo.</b> Participação que não foi lançada no Portal BJ não aparece
     aqui e não conta para o indicador.<br>
     <b>Fontes:</b> {orig_prod} · {orig_rede}
