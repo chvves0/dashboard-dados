@@ -90,7 +90,7 @@ def faixa_alcance(alcance, membros) -> str:
     Os cortes são fechados à direita (25% cai em '0,1% a 25%', 25,4% já cai na
     faixa seguinte), então não sobra buraco entre as faixas.
 
-    EJ sem membros na base — em que o alcance seria uma divisão por zero — entra
+    EJ sem membros na base, em que o alcance seria uma divisão por zero, entra
     como zerada. O bloco da meta da FEJERS mostra quantas são.
     """
     if pd.isna(alcance) or pd.isna(membros) or (membros or 0) <= 0:
@@ -112,7 +112,7 @@ def faixa_alcance(alcance, membros) -> str:
 # --------------------------------------------------------------------------
 # A federação bate a meta quando META_FED_SHARE das EJs da rede alcança,
 # individualmente, pelo menos META_FED_PISO de Engajamento com o MEJ.
-# Hoje: 51% da rede em 50% de ECM — com 61 EJs, 32 precisam chegar lá.
+# Hoje: 51% da rede em 50% de ECM, com 61 EJs, 32 precisam chegar lá.
 
 META_FED_SHARE = 0.51   # fatia da rede que precisa alcançar o piso
 META_FED_PISO  = 0.50   # ECM mínimo de cada EJ para entrar na conta
@@ -938,7 +938,7 @@ with st.container(border=True):
             "desatualizado, corrigir o cadastro muda a meta sem engajar ninguém."
         )
     avisos_meta.append(
-        f"Pelo critério do PE — em que a EJ só é contabilizada quando bate a **própria** "
+        f"Pelo critério do PE, em que a EJ só é contabilizada quando bate a **própria** "
         f"meta de ECM, e não um piso fixo de {pct(META_FED_PISO * 100, 0)} — seriam "
         f"**{bateram_meta_propria} EJs** ({pct(bateram_meta_propria / rede_total * 100)} "
         "da rede). Vale conferir qual das duas leituras a Brasil Júnior audita antes de "
