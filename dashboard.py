@@ -181,6 +181,13 @@ st.markdown(
     }}
     .rodape b {{ color: {LINHA}; }}
 
+    .selo-att {{
+        background: #fff; border: 1px solid {LINHA}; border-left: 4px solid {AMARELO};
+        border-radius: 10px; padding: 10px 12px; margin-bottom: 6px;
+        font-family: 'Poppins', sans-serif; font-size: 12.5px; font-weight: 500;
+        color: {TEXTO};
+    }}
+
     div[data-testid="stSidebar"] {{ background: #FAFBFD; }}
     </style>
     """,
@@ -391,6 +398,37 @@ def _ler_rede(fonte, _versao: str = "") -> pd.DataFrame:
     return df.reset_index(drop=True)
 
 
+@st.cache_data(show_spinner=False, ttl=CACHE_MINUTOS * 60)
+def _ler_atualizacao(fonte, _versao: str = "") -> str:
+    """
+    Devolve o texto da célula A3 do Dados_Gerais_da_Rede,
+    no formato 'Última att: 08/11/2026, 22:57'. Se não achar, devolve "".
+
+    names=range(60) evita erro quando as primeiras linhas do CSV têm menos
+    colunas que as linhas de dados. O seek(0) no fim deixa o arquivo enviado
+    pronto para ser lido de novo pelas outras funções.
+    """
+    topo = None
+    for codificacao in ("utf-8", "latin-1"):
+        try:
+            if hasattr(fonte, "seek"):
+                fonte.seek(0)
+            topo = pd.read_csv(
+                fonte, dtype=str, encoding=codificacao, header=None,
+                names=list(range(60)), nrows=3, skip_blank_lines=False,
+            )
+            break
+        except UnicodeDecodeError:
+            continue
+        finally:
+            if hasattr(fonte, "seek"):
+                fonte.seek(0)
+
+    if topo is None or len(topo) < 3 or pd.isna(topo.iloc[2, 0]):
+        return ""
+    return str(topo.iloc[2, 0]).strip()
+
+
 # --------------------------------------------------------------------------
 # Consolidação: junta as duas bases em empresas + participacoes
 # --------------------------------------------------------------------------
@@ -577,6 +615,10 @@ st.markdown(
 # --------------------------------------------------------------------------
 
 with st.sidebar:
+    # Espaço reservado no topo; é preenchido com a data de atualização
+    # depois que o app descobre de onde vem o Dados_Gerais_da_Rede.
+    slot_atualizacao = st.empty()
+
     st.markdown("### Base de dados")
     enviado_produtos = st.file_uploader(
         "Produtos de Conexão (CSV)",
@@ -628,6 +670,21 @@ else:
         "Commite-o ao lado do `app.py` (ou em `/dados`) ou faça upload acima."
     )
     st.stop()
+
+# --------------------------------------------------------------------------
+# Data da última atualização (célula A3 do Dados_Gerais_da_Rede)
+# --------------------------------------------------------------------------
+
+try:
+    texto_atualizacao = _ler_atualizacao(fonte_rede, ver_rede)
+except Exception:  # noqa: BLE001
+    texto_atualizacao = ""
+
+if texto_atualizacao:
+    slot_atualizacao.markdown(
+        f"<div class='selo-att'>🕒 {texto_atualizacao}</div>",
+        unsafe_allow_html=True,
+    )
 
 try:
     participacoes, empresas, avisos = carregar(
